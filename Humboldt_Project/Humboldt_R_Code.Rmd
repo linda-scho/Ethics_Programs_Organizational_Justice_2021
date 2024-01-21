@@ -1,0 +1,609 @@
+---
+title: "Humboldtprojekt R Analyse"
+output:
+  word_document: default
+  html_notebook: default
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+Packages
+==========
+
+```{r}
+# Packages used for the Analysis were:
+library(plyr)
+library(dplyr)
+library(foreign)
+library(ggplot2)
+library(reshape2)
+library(corrplot)
+library(GGally)
+library(tidyr)
+library(readxl)
+library(stringr)
+library(stargazer)
+library(apaTables)
+library(mediation)
+library(tidyverse)
+library(psych)
+```
+
+Daten Organisieren
+==================
+
+```{r}
+# Dataset
+data_T1_raw = read.spss("/Users/lindacaro/Desktop/Humboldt/Relevant/Daten/Unipark Final/data_T1_clean.sav", to.data.frame = TRUE)
+data_T2_raw = read.spss("/Users/lindacaro/Desktop/Humboldt/Relevant/Daten/Unipark Final/data_T2_raw.sav", to.data.frame = TRUE)
+
+#verbinden der beiden Datensets
+data_full_raw <- inner_join(data_T1_raw, data_T2_raw, by = "p_0002")
+
+#Leerzeichen löschen bei Is im Dataset
+data_full_raw <- data.frame(lapply(data_full_raw, trimws), stringsAsFactors = FALSE)
+
+#excel final IDs als Datenset & filtern der IDs
+data_ids <- read_excel("/Users/lindacaro/Desktop/Humboldt/Relevant/Daten/Unipark Final/Final IDs R.xlsx")
+data_ids[] <- lapply(data_ids, as.character)
+data_full_raw2 <- inner_join(data_full_raw, data_ids, by = c("p_0002"="p_0002_final"))
+
+#Spalten rauswerfen (nur ID & Demogra. & Strategy Items & Form)
+data_full <- subset(data_full_raw2, select = c(-(1),-(3)))
+which(colnames(data_full)=="form_6")
+data_full <- subset(data_full, select = c(1:171))
+which(colnames(data_full)=="ANM.x")
+data_full <- subset(data_full, select = c(-11))
+which(colnames(data_full)=="voice_1")
+which(colnames(data_full)=="form_1")
+data_full <- subset(data_full, select = c(-(122:164)))
+which(colnames(data_full)=="lfdn")
+which(colnames(data_full)=="einw")
+data_full <- subset(data_full, select = c(-(81:91)))
+data_full <- data_full[c(1, 11:80, 83:110 , 2, 82, 3, 81, 4:10, 111:116)]
+which(colnames(data_full)=="tm_s_1")
+which(colnames(data_full)=="i_prm_3")
+data_full <- subset(data_full, select = c(-(15:45)))
+
+#Zeilen unterschiedliches Geschlecht rauswerfen
+data_full[which(data_full$D_ges != data_full$d_geschl),]
+data_full <- data_full[-c(180, 374,451, 485),]
+data_full <- subset(data_full, select = -(which(colnames(data_full)=="d_geschl")))
+
+#Numeric machen
+data_full[,c(2:68)] <- sapply(data_full[ , c(2:68)], function(x) gsub("[^0-9]", "", x))
+data_full[,c(2:68)]<- sapply(data_full[,c(2:68)], as.numeric)
+data_full[,c(70:71)]<- sapply(data_full[,c(70:71)], as.numeric)
+data_full <- data_full %>% mutate(form_1_num = ifelse(form_1 == "nein", 0,1))
+data_full <- data_full %>% mutate(form_2_num = ifelse(form_2 == "nein", 0,1))
+data_full <- data_full %>% mutate(form_3_num = ifelse(form_3 == "nein", 0,1))
+data_full <- data_full %>% mutate(form_4_num = ifelse(form_4 == "nein", 0,1))
+data_full <- data_full %>% mutate(form_5_num = ifelse(form_5 == "nein", 0,1))
+data_full <- data_full %>% mutate(form_6_num = ifelse(form_6 == "nein", 0,1))
+data_full <- subset(data_full, select = -c(79:84))
+
+# Kontrollvariablen Skalierung ändern
+# 1. Job Position 1 bis 5
+data_full <- data_full %>% mutate(D_pos_num = ifelse(D_pos == "InhaberIn", 6, ifelse(D_pos == "BerufseinsteigerIn (z. B. PraktikantIn, studentischeR MitarbeiterIn, Trainee)",1, ifelse(D_pos == "MitarbeiterIn (z. B. SachbearbeiterIn, ProjektmitarbeiterIn)",2, ifelse(D_pos == "Unteres Management (z. B. GruppenleiterIn)", 3, ifelse(D_pos == "Mittleres Management (z. B. AbteilungsleiterIn, BetriebsleiterIn)",4, ifelse(D_pos == "Oberes Management (z. B. GeschäftsführerIn, Vorstandsmitglied)", 5,0)))))))
+# 2. Size of Company 1 bis 4
+data_full <- data_full %>% mutate(D_mit_num = ifelse(D_mit == "< 50", 1, ifelse(D_mit == "50 - 249",2, ifelse(D_mit == "250 - 10.000",3, ifelse(D_mit == "> 10.000", 4,0)))))
+# 3. Yeasrs in Company
+data_full <- data_full %>% mutate(D_zeit_num = ifelse(D_zeit == "1 - 2", 1, ifelse(D_zeit == "3 - 5",2, ifelse(D_zeit == "6 - 10",3, ifelse(D_zeit == "> 10", 4,0)))))
+# numerisch machen
+data_full[,c(85:87)]<- sapply(data_full[,c(85:87)], as.numeric)
+
+
+#Humboldtprojekt Datensatz
+#Zeilen rauswerfen (nur Objekte mit Overall Justice fürs Humboldtprojekt)
+data_full_HP <- data_full[!(is.na(data_full$oj_1))| !(is.na(data_full$oj_2)) |  !(is.na(data_full$oj_4_rec)) | !(is.na(data_full$oj_5)) | !(is.na(data_full$oj_6_rec)),]
+#Spalten rausewerfen (nur Items Humboldtprojekt)
+which(colnames(data_full_HP)=="oj_p_1")
+which(colnames(data_full_HP)=="oj_if_5")
+data_full_HP <- subset(data_full_HP, select= c(-(21:40)))
+```
+
+Humboldtprojekt Daten Organisieren Mittelwerte
+===============================================
+
+```{r}
+# Mittelwerte berechnen
+s_c_mean = rowMeans(data_full_HP[,2:7], na.rm = TRUE)
+s_i_mean = rowMeans(data_full_HP[, 8:14], na.rm = TRUE)
+oj_mean = rowMeans(data_full_HP[, 15:20], na.rm = TRUE)
+ub_mean = rowMeans(data_full_HP[, 21:34], na.rm = TRUE)
+ub_em_mean = rowMeans(data_full_HP[,21:25], na.rm = TRUE)
+ub_fin_mean = rowMeans(data_full_HP[,26:30], na.rm = TRUE)
+ub_soc_mean = rowMeans(data_full_HP[,31:34], na.rm = TRUE)
+eb_mean = rowMeans(data_full_HP[,35:48], na.rm = TRUE)
+eb_ind_mean = rowMeans(data_full_HP[,35:42], na.rm = TRUE)
+eb_org_mean = rowMeans(data_full_HP[,43:48], na.rm = TRUE)
+
+data_full_HP_mean <- data.frame(p_0002 = data_full_HP$p_0002, s_c_mean, s_i_mean, oj_mean, ub_mean,eb_mean, ub_em_mean, ub_fin_mean, ub_soc_mean, eb_ind_mean, eb_org_mean, D_ges = data_full_HP$D_ges, D_alt_T1 = data_full_HP$D_alt_num, D_alt_T2 = data_full_HP$d_alt, D_ausb = data_full_HP$D_ausb, D_arb = data_full_HP$D_arb, D_arb_e = data_full_HP$D_arb_e, D_bran = data_full_HP$D_bran, D_mit = data_full_HP$D_mit, D_zeit = data_full_HP$D_zeit, D_pos = data_full_HP$D_pos, D_mit_num = data_full_HP$D_mit_num, D_zeit_num = data_full_HP$D_zeit_num, D_pos_num = data_full_HP$D_pos_num, form_1_num = data_full_HP$form_1_num, form_2_num = data_full_HP$form_2_num, form_3_num = data_full_HP$form_3_num, form_4_num = data_full_HP$form_4_num, form_5_num = data_full_HP$form_5_num, form_6_num = data_full_HP$form_6_num)
+
+
+#Vollständige Namen der Variablen
+data_full_HP_mean_names <- rename(data_full_HP_mean, c("Compliance Strategy" = "s_c_mean", "Integrity Strategy" = "s_i_mean", "Perceived Overall Organizational Justice" = "oj_mean", "Deviant Workplace Behavior" = "ub_mean", "Deviant Workplace Behavior Financiers" = "ub_fin_mean", "Deviant Workplace Behavior Society" = "ub_soc_mean", "Organizational Citizenship Behavior Individual" = "eb_ind_mean", "Organizational Citizenship Behavior Organization" = "eb_org_mean", "Gender T1" = "D_ges" , "Age T1" = "D_alt_T1", "Age T2" = "D_alt_T2"))
+```
+
+
+Humboldtprojekt Daten Organisieren Behavior Bivariat
+=====================================================
+
+```{r}
+# Mittelwerte berechnen
+s_c_mean = rowMeans(data_full_HP[,2:7], na.rm = TRUE)
+s_i_mean = rowMeans(data_full_HP[, 8:14], na.rm = TRUE)
+oj_mean = rowMeans(data_full_HP[, 15:20], na.rm = TRUE)
+
+# Bivariate Werte berechnen
+data_full_HP_biv_1 <- data_full_HP %>% mutate(ub_em_1_biv = ifelse(ub_em_1 == 1, 0, 1),
+                                            ub_em_2_biv = ifelse(ub_em_2 == 1, 0, 1),
+                                            ub_em_3_biv = ifelse(ub_em_3 == 1, 0, 1),
+                                            ub_em_4_biv = ifelse(ub_em_4 == 1, 0, 1),
+                                            ub_em_5_biv = ifelse(ub_em_5 == 1, 0, 1),
+                                            ub_fin_1_biv = ifelse(ub_fin_1 == 1, 0, 1),
+                                            ub_fin_2_biv = ifelse(ub_fin_2 == 1, 0, 1),
+                                            ub_fin_3_biv = ifelse(ub_fin_3 == 1, 0, 1),
+                                            ub_fin_4_biv = ifelse(ub_fin_4 == 1, 0, 1),
+                                            ub_fin_5_biv = ifelse(ub_fin_5 == 1, 0, 1),
+                                            ub_soc_1_biv = ifelse(ub_soc_1 == 1, 0, 1),
+                                            ub_soc_2_biv = ifelse(ub_soc_2 == 1, 0, 1),
+                                            ub_soc_3_biv = ifelse(ub_soc_3 == 1, 0, 1),
+                                            ub_soc_4_biv = ifelse(ub_soc_4 == 1, 0, 1),
+                                            eb_ind_1_biv = ifelse(eb_ind_1 == 1, 0, 1),
+                                            eb_ind_2_biv = ifelse(eb_ind_2 == 1, 0, 1),
+                                            eb_ind_3_biv = ifelse(eb_ind_3 == 1, 0, 1),
+                                            eb_ind_4_biv = ifelse(eb_ind_4 == 1, 0, 1),
+                                            eb_ind_5_biv = ifelse(eb_ind_5 == 1, 0, 1),
+                                            eb_ind_6_biv = ifelse(eb_ind_6 == 1, 0, 1),
+                                            eb_ind_7_biv = ifelse(eb_ind_7 == 1, 0, 1),
+                                            eb_ind_8_biv = ifelse(eb_ind_8 == 1, 0, 1),
+                                            eb_org_1_biv = ifelse(eb_org_1 == 1, 0, 1),
+                                            eb_org_2_biv = ifelse(eb_org_2 == 1, 0, 1),
+                                            eb_org_3_biv = ifelse(eb_org_3 == 1, 0, 1),
+                                            eb_org_4_biv = ifelse(eb_org_4 == 1, 0, 1),
+                                            eb_org_5_biv = ifelse(eb_org_5 == 1, 0, 1),
+                                            eb_org_6_biv = ifelse(eb_org_6 == 1, 0, 1))
+
+data_full_HP_biv <- data_full_HP_biv_1 %>% mutate(ub_em_biv = (ub_em_1_biv + ub_em_2_biv + ub_em_3_biv + ub_em_4_biv +
+                                                               ub_em_5_biv),
+                                                ub_fin_biv = (ub_fin_1_biv + ub_fin_2_biv + ub_fin_3_biv +
+                                                                ub_fin_4_biv + ub_fin_5_biv),
+                                                ub_soc_biv = (ub_soc_1_biv + ub_soc_2_biv + ub_soc_3_biv +
+                                                                ub_soc_4_biv),
+                                                ub_biv = (ub_em_biv + ub_fin_biv + ub_soc_biv),
+                                                eb_ind_biv = (eb_ind_1_biv + eb_ind_2_biv + eb_ind_3_biv +
+                                                                eb_ind_4_biv + eb_ind_5_biv + eb_ind_6_biv +
+                                                                eb_ind_7_biv + eb_ind_8_biv),
+                                                eb_org_biv = (eb_org_1_biv + eb_org_2_biv + eb_org_3_biv +
+                                                                eb_org_4_biv + eb_org_5_biv + eb_org_6_biv),
+                                                eb_biv = (eb_ind_biv + eb_org_biv))
+
+data_full_HP_biv[,c(2:48)]<- sapply(data_full_HP_biv[,c(2:48)], as.numeric)
+data_full_HP_biv[,c(50:51)]<- sapply(data_full_HP_biv[,c(50:51)], as.numeric)
+data_full_HP_biv[,c(59:102)]<- sapply(data_full_HP_biv[,c(59:102)], as.numeric)
+
+data_full_HP_biv <- data.frame(p_0002 = data_full_HP_biv$p_0002, s_c_mean, s_i_mean, oj_mean, ub_biv = data_full_HP_biv$ub_biv, eb_biv = data_full_HP_biv$eb_biv, ub_em_biv = data_full_HP_biv$ub_em_biv, ub_fin_biv = data_full_HP_biv$ub_fin_biv, ub_soc_biv = data_full_HP_biv$ub_soc_biv, eb_ind_biv = data_full_HP_biv$eb_ind_biv, eb_org_biv = data_full_HP_biv$eb_org_biv, D_ges = data_full_HP_biv$D_ges, D_alt_T1 = data_full_HP_biv$D_alt_num, D_alt_T2 = data_full_HP_biv$d_alt, D_ausb = data_full_HP_biv$D_ausb, D_arb = data_full_HP_biv$D_arb, D_arb_e = data_full_HP_biv$D_arb_e, D_bran = data_full_HP_biv$D_bran, D_mit = data_full_HP_biv$D_mit, D_zeit = data_full_HP_biv$D_zeit, D_pos = data_full_HP_biv$D_pos, D_mit_num = data_full_HP_biv$D_mit_num, D_zeit_num = data_full_HP_biv$D_zeit_num, D_pos_num = data_full_HP_biv$D_pos_num, form_1_num = data_full_HP$form_1_num, form_2_num = data_full_HP$form_2_num, form_3_num = data_full_HP$form_3_num, form_4_num = data_full_HP$form_4_num, form_5_num = data_full_HP$form_5_num, form_6_num = data_full_HP$form_6_num)
+
+
+#Vollständige Namen der Variablen
+data_full_HP_biv_names <- rename(data_full_HP_biv, c("Compliance Strategy" = "s_c_mean", "Integrity Strategy" = "s_i_mean", "Perceived Overall Organizational Justice" = "oj_mean", "Deviant Workplace Behavior" = "ub_biv", "Organizational Citizenship Behavior" = "eb_biv", "Deviant Workplace Behavior Employees" = "ub_em_biv", "Deviant Workplaace Behavior Financiers" = "ub_fin_biv", "Deviant Workplaace Behavior Society" = "ub_soc_biv", "Organizational Citizenship Behavior Individual" = "eb_ind_biv", "Organizational Citizenship Behavior Organization" = "eb_org_biv", "Gender" = "D_ges", "Age T1" = "D_alt_T1", "Age T2" = "D_alt_T2", "Job Position" = "D_pos_num", "Years in Company" = "D_zeit_num", "Size of the company" = "D_mit_num", "Sector" = "D_bran", "Working Time" = "D_arb"))
+```
+
+Deskreptive Statistik HP
+=========================
+
+```{r}
+# Anzahl insgesamt
+nrow(data_full_HP_biv)
+```
+```{r}
+# Summary Age
+summary(data_full_HP_biv$D_alt_T1, na.rm = TRUE)
+```
+
+```{r}
+# Summary Age
+summary(data_full_HP_biv$D_alt_T2, na.rm = TRUE)
+```
+
+```{r}
+# Quantiles Age
+quantile(data_full_HP_biv$D_alt_T2, na.rm = TRUE)
+```
+```{r}
+# SD Age
+sd(data_full_HP_biv$D_alt_T2, na.rm = TRUE)
+```
+```{r}
+# Anzahl Alter 18 - 25
+d_age_group1 = length(which(data_full_HP_biv$D_alt_T2<= "25"))
+# Anzahl Alter 26 - 35
+d_age_group2 = length(which(data_full_HP_biv$D_alt_T2 > "25" & data_full_HP_biv$D_alt_T2 < "36"))
+# Anzahl Alter 36 - 45
+d_age_group3 = length(which(data_full_HP_biv$D_alt_T2 > "35" & data_full_HP_biv$D_alt_T2 < "46"))
+# Anzahl Alter 46 - 55
+d_age_group4 = length(which(data_full_HP_biv$D_alt_T2 > "45" & data_full_HP_biv$D_alt_T2 < "56"))
+# Anzahl Alter 56 - 65
+d_age_group5 = length(which(data_full_HP_biv$D_alt_T2 > "55" & data_full_HP_biv$D_alt_T2 < "66"))
+```
+
+```{r}
+# Anteil 18-25
+d_age_group1_perc = (d_age_group1)/length(data_full_HP_biv$D_alt_T2)
+d_age_group1_perc
+```
+```{r}
+# Anteil 26-35
+d_age_group2_perc = (d_age_group2)/length(data_full_HP_biv$D_alt_T2)
+d_age_group2_perc
+```
+```{r}
+# Anteil 36-45
+d_age_group3_perc = (d_age_group3)/length(data_full_HP_biv$D_alt_T2)
+d_age_group3_perc
+```
+```{r}
+# Anteil 46-55
+d_age_group4_perc = (d_age_group4)/length(data_full_HP_biv$D_alt_T2)
+d_age_group4_perc
+```
+```{r}
+# Anteil 56-65
+d_age_group5_perc = (d_age_group5)/length(data_full_HP_biv$D_alt_T2)
+d_age_group5_perc
+```
+
+```{r}
+# Absolute Zahl Männer
+d_gender_male_count = length(which(data_full_HP_biv$D_ges =="Männlich"))
+d_gender_male_count
+```
+
+```{r}
+# Absoluter Anteil Frauen
+d_gender_female_count = length(which(data_full_HP_biv$D_ges =="Weiblich"))
+d_gender_female_count
+```
+```{r}
+#Anteil Frauen
+d_gender_female_perc = (d_gender_female_count)/(d_gender_female_count + d_gender_male_count)
+d_gender_female_perc
+```
+```{r}
+#Anteil Männer
+d_gender_male_perc = (d_gender_male_count)/(d_gender_male_count + d_gender_female_count)
+d_gender_male_perc
+```
+
+```{r}
+# Table: Employment Part- & Fulltime, Job Position, Tenure (in current organization), Company Size, Economic Sector
+outputter <-  function(x){
+  d_rownames <- names(table(x))
+  d_entries <- table(x) %>% as.numeric()
+  d_perc_entries <- table(x) %>% prop.table() %>% as.numeric()
+  return(data.frame("names" = d_rownames,"n" = d_entries,"perc" = d_perc_entries))
+}
+
+tablemaker <- function(listofvars, xtype = "html"){
+  td <- NULL
+  td <- data.frame("names" = NA,"n" = NA, "perc" = NA)
+  
+  for(i in 1:length(listofvars)){
+    td <- rbind(td,outputter(listofvars[[i]]))
+  }
+    stargazer(td[-1,], summary = F, type = xtype, out = "Demograph.html")
+    return(td[-1,])
+}
+
+data_full_HP_soz <- tablemaker(list(data_full_HP$D_arb, data_full_HP$D_pos, data_full_HP$D_zeit, data_full_HP$D_mit,data_full_HP$D_bran))
+```
+
+Korrelation, Mean, SD, Cronbach's Alpha
+========================================
+
+```{r}
+#Korrelation biv. UB & EB
+#Organisieren der Daten -> Datenset
+data_full_HP_biv_names_correlation <- subset(data_full_HP_biv_names, select= c(2:6))
+apa.cor.table(data_full_HP_biv_names_correlation, filename = "Table_biv_Correlation.doc", table.number = 1)
+```
+```{r}
+# Cronbach's Alpha: Compliance
+alpha(subset(data_full_HP, select = c("s_c_1", "s_c_2","s_c_4", "s_c_5","s_c_6", "s_c_8")), check.keys = TRUE)
+```
+```{r}
+# Cronbach's Alpha:Integrity
+alpha(subset(data_full_HP, select = c("s_i_1", "s_i_2","s_i_3", "s_i_4","s_i_5", "s_i_6", "s_i_7")), check.keys = TRUE)
+```
+```{r}
+# Cronbach's Alpha: Justice
+alpha(subset(data_full_HP, select = c("oj_1", "oj_2","oj_4_rec", "oj_3","oj_5", "oj_6_rec")), check.keys = TRUE)
+```
+```{r}
+# Cronbach's Alpha: DWB
+alpha(subset(data_full_HP_biv_1, select = c("ub_em_1_biv", "ub_em_2_biv", "ub_em_3_biv", "ub_em_4_biv","ub_em_5_biv","ub_fin_1_biv", "ub_fin_2_biv", "ub_fin_3_biv", "ub_fin_4_biv", "ub_fin_5_biv","ub_soc_1_biv","ub_soc_2_biv", "ub_soc_3_biv","ub_soc_4_biv")), check.keys = TRUE)
+```
+
+```{r}
+# Cronbach's Alpha: OCB
+alpha(subset(data_full_HP_biv_1, select = c("eb_ind_1_biv", "eb_ind_2_biv", "eb_ind_3_biv", "eb_ind_4_biv", "eb_ind_5_biv", "eb_ind_6_biv", "eb_ind_7_biv", "eb_ind_8_biv", "eb_org_1_biv", "eb_org_2_biv", "eb_org_3_biv","eb_org_4_biv","eb_org_5_biv","eb_org_6_biv")), check.keys = TRUE)
+```
+
+
+Mediator Analyses (UB & EB Bivariat)
+=====================================
+
+Mediator Compliance & UB
+========================
+
+```{r}
+# Daten ordnen (N = 207)
+data_full_HP_biv_mediator <- subset(data_full_HP_biv, select = -c(1))
+data_full_HP_biv_mediator <- subset(data_full_HP_biv_mediator, select = -c(6:10))
+data_full_HP_biv_mediator <- subset(data_full_HP_biv_mediator, select = -c(7))
+data_full_HP_biv_mediator <- subset(data_full_HP_biv_mediator, select = -c(8))
+data_full_HP_biv_mediator <- subset(data_full_HP_biv_mediator, select = -c(9:13))
+data_full_HP_biv_mediator <- subset(data_full_HP_biv_mediator, select = -c(12:17))
+data_full_HP_biv_mediator <- na.omit(data_full_HP_biv_mediator)
+```
+
+```{r}
+# 1. Bootstrap Confidence Interval
+lr_sc_ub <- lm(ub_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + D_zeit_num + s_c_mean,
+              data_full_HP_biv_mediator)
+lr_sc_oj<- lm(oj_mean ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + D_zeit_num + s_c_mean,
+              data_full_HP_biv_mediator)
+lr_sc_oj_ub <- lm(ub_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + D_zeit_num + s_c_mean + oj_mean,
+              data_full_HP_biv_mediator)
+
+mediation_sc_ub <- mediation::mediate(lr_sc_oj, lr_sc_oj_ub, treat='s_c_mean', mediator='oj_mean', boot=TRUE,
+                                      sims=1000)
+summary(mediation_sc_ub)
+```
+
+```{r}
+#2. Compliance -> UB
+summary(lr_sc_ub)
+```
+
+```{r}
+#3. Compliance -> Justice
+summary(lr_sc_oj)
+```
+```{r}
+#4. Compliance & Justice -> UB
+summary(lr_sc_oj_ub)
+```
+
+```{r}
+stargazer( lr_sc_oj, lr_sc_ub, lr_sc_oj_ub,
+           type = "text",
+           out = "Mediator_Comp_UB.html",
+           column.labels = c("Step 1", "Step 2", "Step 3"),
+           model.numbers = FALSE,
+           keep.stat = c("adj.rsq", "f"),
+           notes.align = "l",
+           single.row = TRUE,
+           notes.label = "Notes.",
+           notes.append = FALSE,
+           no.space = TRUE,
+           dep.var.caption = "",
+           star.cutoffs = c(.05, .01, .001),
+           notes = "Numbers present the estimates, the brakets include the standard error. N = 329. * p < .05. ** p < .01. *** p < .001.", title = "Results on regression analyses: Compliance and Deviant Workplace Behavior",
+          covariate.labels = c("Gender (female)", "Age", "Size of the Company","Job
+          Position","Years in Company","Compliance Strategy", "POJ", "Constant"),
+          dep.var.labels = c("POJ","DWB"))
+```
+
+
+Mediator Compliance & EB
+========================
+```{r}
+# 1. Bootstrap Confidence Interval
+lr_sc_eb <- lm(eb_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + D_zeit_num + s_c_mean,
+              data_full_HP_biv_mediator)
+lr_sc_oj<- lm(oj_mean ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + D_zeit_num + s_c_mean,
+              data_full_HP_biv_mediator)
+lr_sc_oj_eb <- lm(eb_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + D_zeit_num + s_c_mean + oj_mean,
+              data_full_HP_biv_mediator)
+
+mediation_sc_eb <- mediation::mediate(lr_sc_oj, lr_sc_oj_eb, treat='s_c_mean', mediator='oj_mean', boot=TRUE,
+                                      sims=1000)
+summary(mediation_sc_eb)
+```
+
+```{r}
+#2. Compliance -> EB
+summary(lr_sc_eb)
+```
+
+Mediator Integrity & UB
+========================
+```{r}
+# 1. Bootstrap Confidence Interval
+lr_si_ub <- lm(ub_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + D_zeit_num + s_i_mean,
+              data_full_HP_biv_mediator)
+lr_si_oj<- lm(oj_mean ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + D_zeit_num + s_i_mean,
+              data_full_HP_biv_mediator)
+lr_si_oj_ub <- lm(ub_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + D_zeit_num + s_i_mean + oj_mean,
+              data_full_HP_biv_mediator)
+
+mediation_si_ub <- mediation::mediate(lr_si_oj, lr_si_oj_ub, treat='s_i_mean', mediator='oj_mean', boot=TRUE,
+                                      sims=1000)
+summary(mediation_si_ub)
+```
+
+
+```{r}
+# 2. Integrity -> UB
+summary(lr_si_ub)
+```
+```{r}
+# 3. Integrity -> Justice
+summary(lr_si_oj)
+```
+
+```{r}
+# 4. Integrity & Justice -> UB
+summary(lr_si_oj_ub)
+```
+
+```{r}
+stargazer( lr_si_oj, lr_si_ub, lr_si_oj_ub,
+           type = "text",
+           out = "Mediator_Integ_UB.html",
+           column.labels = c("Step 1", "Step 2", "Step 3"),
+           model.numbers = FALSE,
+           keep.stat = c("adj.rsq", "f"),
+           notes.align = "l",
+           single.row = TRUE,
+           notes.label = "Notes.",
+           notes.append = FALSE,
+           no.space = TRUE,
+           dep.var.caption = "",
+           star.cutoffs = c(.05, .01, .001),
+           notes = "Numbers present the estimates, the brakets include the standard error. N = 329. * p < .05. ** p < .01. *** p < .001.", title = "Results on regression analyses: Integrity Strategy and Deviant Workplace Behavior",
+          covariate.labels = c("Gender (female)", "Age", "Size of the Company","Job
+          Position","Years in Company","Integrity Strategy", "POJ", "Constant"),
+          dep.var.labels = c("POJ","DWB"))
+```
+
+Mediator Integrity & EB
+========================
+```{r}
+# 1. Bootstrap Confidence Interval
+lr_si_eb <- lm(eb_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + D_zeit_num + s_i_mean,
+              data_full_HP_biv_mediator)
+lr_si_oj<- lm(oj_mean ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + D_zeit_num + s_i_mean,
+              data_full_HP_biv_mediator)
+lr_si_oj_eb <- lm(eb_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + D_zeit_num + s_i_mean + oj_mean,
+              data_full_HP_biv_mediator)
+
+mediation_si_eb <- mediation::mediate(lr_si_oj, lr_si_oj_eb, treat='s_i_mean', mediator='oj_mean', boot=TRUE,
+                                      sims=1000)
+summary(mediation_si_eb)
+```
+
+```{r}
+# 2. Integrity -> EB
+summary(lr_si_eb)
+```
+```{r}
+#3. Integrity -> Justice
+summary(lr_si_oj)
+```
+
+```{r}
+# 4. Integrity & Justice -> EB
+summary(lr_si_oj_eb)
+```
+```{r}
+stargazer( lr_si_oj, lr_si_eb, lr_si_oj_eb,
+           type = "text",
+           out = "Mediator_Integ_EB.html",
+           column.labels = c("Step 1", "Step 2", "Step 3"),
+           model.numbers = FALSE,
+           keep.stat = c("adj.rsq", "f"),
+           notes.align = "l",
+           single.row = TRUE,
+           notes.label = "Notes.",
+           notes.append = FALSE,
+           no.space = TRUE,
+           dep.var.caption = "",
+           star.cutoffs = c(.05, .01, .001),
+           notes = "Numbers present the estimates, the brakets include the standard error. N = 329. * p < .05. ** p < .01. *** p < .001.", title = "Results on regression analyses: Integrity Strategy and Organizational Citizenship
+           Behavior",
+          covariate.labels = c("Gender (female)", "Age", "Size of the Company","Job
+          Position","Years in Company","Integrity Strategy", "POJ", "Constant"),
+          dep.var.labels = c("POJ","OCB"))
+```
+
+
+Moderation Analyses (UB & EB Bivariat)
+======================================
+```{r}
+#1. Data Preperation: centralizing
+library("jtools")
+library("interactions")
+data_full_HP_biv_centered <- gscale(data = data_full_HP_biv,vars = c("s_c_mean", "s_i_mean","oj_mean"), center.only = TRUE)
+```
+
+
+Moderator Compliance & UB
+==========================
+```{r}
+#1. Compliance & OJ -> UB -> Keine Interaktion
+mod_scoj_ub <- lm(ub_biv~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + D_zeit_num + s_c_mean*oj_mean, data = data_full_HP_biv_centered)
+summary(mod_scoj_ub)
+```
+
+```{r}
+# 2. Graph
+probe_interaction(mod_scoj_ub, s_c_mean, oj_mean)
+```
+
+
+Moderator Compliance & EB
+==========================
+
+```{r}
+#1. Compliance & OJ -> EB
+mod_scoj_eb <- lm(eb_biv~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + D_zeit_num + s_c_mean*oj_mean, data = data_full_HP_biv_centered)
+summary(mod_scoj_eb)
+```
+```{r}
+probe_interaction(mod_scoj_eb, s_c_mean, oj_mean)
+```
+
+
+Moderator Integrity & UB
+==========================
+
+```{r}
+#1. Integrity & OJ -> UB
+mod_sioj_ub <- lm(ub_biv~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + D_zeit_num + s_i_mean*oj_mean, data = data_full_HP_biv_centered)
+summary(mod_sioj_ub)
+```
+```{r}
+probe_interaction(mod_sioj_ub, s_i_mean, oj_mean)
+```
+
+Moderator Integrity & EB
+==========================
+
+```{r}
+#1. Integrity & OJ -> EB
+mod_sioj_eb <- lm(eb_biv~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + D_zeit_num + s_i_mean*oj_mean, data = data_full_HP_biv_centered)
+summary(mod_sioj_eb)
+```
+
+
+```{r}
+probe_interaction(mod_sioj_eb, s_i_mean, oj_mean)
+```
+
+```{r}
+# 3. Tabelle
+stargazer( mod_scoj_ub, mod_sioj_ub,mod_sioj_eb,
+           type = "text",
+           out = "Moderator.html",
+           model.numbers = FALSE,
+           keep.stat = c("adj.rsq", "f"),
+           notes.align = "l",
+           single.row = TRUE,
+           notes.label = "Notes.",
+           notes.append = FALSE,
+           no.space = TRUE,
+           dep.var.caption = "",
+           star.cutoffs = c(.05, .01, .001),
+           notes = "Numbers present the estimates, the brakets include the standard error. N = 329. * p < .05. ** p < .01. *** p < .001.", title = "Results on regression analyses for moderator: Compliance Strategy",
+          covariate.labels = c("Gender (female)", "Age", "Size of the Company","Job
+          Position","Years in Company","Compliance Strategy", "Integrity Strategy", "Perceived Organizational
+          Justice", "Interaction Effect Compliance Strategy & Perceived Organizational Justice", "Interaction
+          Integrity Strategy & Perceived Organisational Justice", "Constant"),
+          dep.var.labels = c("Deviant Workplace Behavior","Organizational Citizenship Behavior"))
+```
+
+

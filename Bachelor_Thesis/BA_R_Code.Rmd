@@ -1,0 +1,651 @@
+---
+title: "BA R Analyse"
+output:
+  pdf_document: default
+  html_notebook: default
+  html_document:
+    df_print: paged
+  word_document: default
+---
+
+Packages
+==========
+
+```{r}
+# Packages used for the Analysis were:
+library(plyr)
+library(dplyr)
+library(foreign)
+library(ggplot2)
+library(reshape2)
+library(corrplot)
+library(GGally)
+library(tidyr)
+library(readxl)
+library(stringr)
+library(stargazer)
+library(apaTables)
+library(mediation)
+library(tidyverse)
+library(psych)
+```
+
+Daten Organisieren
+==================
+
+```{r}
+# Dataset
+data_T1_raw = read.spss("/Users/lindacaro/Desktop/Humboldt/Relevant/Daten/Unipark Final/data_T1_clean.sav", to.data.frame = TRUE)
+data_T2_raw = read.spss("/Users/lindacaro/Desktop/Humboldt/Relevant/Daten/Unipark Final/data_T2_raw.sav", to.data.frame = TRUE)
+
+#verbinden der beiden Datensets
+data_full_raw <- inner_join(data_T1_raw, data_T2_raw, by = "p_0002")
+
+#Leerzeichen löschen bei Is im Dataset
+data_full_raw <- data.frame(lapply(data_full_raw, trimws), stringsAsFactors = FALSE)
+
+#excel final IDs als Datenset & filtern der IDs
+data_ids <- read_excel("/Users/lindacaro/Desktop/Humboldt/Relevant/Daten/Unipark Final/Final IDs R.xlsx")
+data_ids[] <- lapply(data_ids, as.character)
+data_full_raw2 <- inner_join(data_full_raw, data_ids, by = c("p_0002"="p_0002_final"))
+colnames(data_full_raw2)
+
+#Spalten rauswerfen (nur ID & Demogra. & Strategy Items & Form)
+data_full <- subset(data_full_raw2, select = -c(p_0001.x, duration_min, ANM.x, lfdn:duration, we_vit_1:wm_am_3, c_0001:einw, tm_s_1:i_prm_3))
+data_full <- subset(data_full, select = c(p_0002:form_6))
+data_full <- data_full[c(1, 11:49, 52:88, 2, 51, 3, 50, 4:10, 89:94)]
+
+#Zeilen unterschiedliches Geschlecht rauswerfen
+data_full <- data_full[-c(which(data_full$D_ges != data_full$d_geschl)),]
+data_full <- subset(data_full, select = -(d_geschl))
+
+#Numeric machen
+colnames(data_full)
+data_full[,c(2:77)] <- sapply(data_full[ , c(2:77)], function(x) gsub("[^0-9]", "", x))
+data_full[,c(2:77)]<- sapply(data_full[,c(2:77)], as.numeric)
+data_full[,c(79:80)]<- sapply(data_full[,c(79:80)], as.numeric)
+data_full <- data_full %>% mutate(form_1_num = ifelse(form_1 == "nein", 0,1))
+data_full <- data_full %>% mutate(form_2_num = ifelse(form_2 == "nein", 0,1))
+data_full <- data_full %>% mutate(form_3_num = ifelse(form_3 == "nein", 0,1))
+data_full <- data_full %>% mutate(form_4_num = ifelse(form_4 == "nein", 0,1))
+data_full <- data_full %>% mutate(form_5_num = ifelse(form_5 == "nein", 0,1))
+data_full <- data_full %>% mutate(form_6_num = ifelse(form_6 == "nein", 0,1))
+
+# Form_1 bis Form_6 löschen
+data_full <- subset(data_full, select = -c(form_1:form_6))
+
+# Kontrollvariablen Skalierung ändern
+# 1. Job Position 1 bis 6
+data_full <- data_full %>% mutate(D_pos_num = ifelse(D_pos == "InhaberIn", 6, ifelse(D_pos == "BerufseinsteigerIn (z. B. PraktikantIn, studentischeR MitarbeiterIn, Trainee)",1, ifelse(D_pos == "MitarbeiterIn (z. B. SachbearbeiterIn, ProjektmitarbeiterIn)",2, ifelse(D_pos == "Unteres Management (z. B. GruppenleiterIn)", 3, ifelse(D_pos == "Mittleres Management (z. B. AbteilungsleiterIn, BetriebsleiterIn)",4, ifelse(D_pos == "Oberes Management (z. B. GeschäftsführerIn, Vorstandsmitglied)", 5,0)))))))
+# 2. Size of Company 1 bis 4
+data_full <- data_full %>% mutate(D_mit_num = ifelse(D_mit == "< 50", 1, ifelse(D_mit == "50 - 249",2, ifelse(D_mit == "250 - 10.000",3, ifelse(D_mit == "> 10.000", 4,0)))))
+# 3. Yeasrs in Company
+data_full <- data_full %>% mutate(D_zeit_num = ifelse(D_zeit == "1 - 2", 1, ifelse(D_zeit == "3 - 5",2, ifelse(D_zeit == "6 - 10",3, ifelse(D_zeit == "> 10", 4,0)))))
+# numerisch machen
+data_full[,c(85:87)]<- sapply(data_full[,c(85:87)], as.numeric)
+
+#Humboldtprojekt Datensatz
+#Zeilen rauswerfen (nur Objekte mit Overall Justice fürs Humboldtprojekt) - 656 zu 329
+data_full_HP <- data_full[!(is.na(data_full$oj_1))| !(is.na(data_full$oj_2)) | !(is.na(data_full$oj_3)) | !(is.na(data_full$oj_4_rec)) | !(is.na(data_full$oj_5)) | !(is.na(data_full$oj_6_rec)),]
+
+# BA Datensatz
+data_full_BA <- data_full[!(is.na(data_full$oj_p_1))| !(is.na(data_full$oj_p_2)) |  !(is.na(data_full$oj_p_3)) |!(is.na(data_full$oj_p_4)) | !(is.na(data_full$oj_p_5)) |!(is.na(data_full$oj_p_6)) | !(is.na(data_full$oj_p_7)) |!(is.na(data_full$oj_d_1)) |!(is.na(data_full$oj_d_2)) | !(is.na(data_full$oj_d_3)) |!(is.na(data_full$oj_d_4)) |!(is.na(data_full$oj_ip_1)) | !(is.na(data_full$oj_ip_2)) |!(is.na(data_full$oj_ip_3)) |!(is.na(data_full$oj_ip_4)) |!(is.na(data_full$oj_if_1)) |!(is.na(data_full$oj_if_2)) |!(is.na(data_full$oj_if_3)) |!(is.na(data_full$oj_if_4))|!(is.na(data_full$oj_if_5)),]
+
+# Check: 8 participants did respond with NA for all Justice questions
+data_full_nichtBAHP <- setdiff(data_full, data_full_HP)
+data_full_nichtBAHP <- setdiff(data_full_nichtBAHP, data_full_BA)
+
+#Spalten rausewerfen (nur Items BA)
+data_full_BA <- subset(data_full_BA, select = -c(oj_1:oj_6_rec))
+colnames(data_full_BA)
+
+# Reverse Coding (OJ_ip_4)
+data_full_BA <- data_full_BA %>% mutate(oj_ip_4 = ifelse(oj_ip_4 == 1, 5, ifelse(oj_ip_4 == 2, 4, ifelse(oj_ip_4 == 3, 3, ifelse (oj_ip_4 == 4, 2, ifelse(oj_ip_4 == 5,1, 0))))))
+# Reverse Coding (turnover_3)
+data_full_BA <- data_full_BA %>% mutate(turnover_3 = ifelse(turnover_3 == 1, 5, ifelse(turnover_3 == 2, 4, ifelse(turnover_3 == 3, 3, ifelse (turnover_3 == 4, 2, ifelse(turnover_3 == 5,1, 0))))))
+```
+
+BA Daten Organisieren Mittelwerte
+=================================
+
+```{r}
+# Mittelwerte berechnen
+colnames(data_full_BA)
+s_c_mean = rowMeans(data_full_BA[,which(colnames(data_full_BA)=="s_c_1"):which(colnames(data_full_BA)=="s_c_8")], na.rm = TRUE)
+s_i_mean = rowMeans(data_full_BA[, which(colnames(data_full_BA)=="s_i_1"):which(colnames(data_full_BA)=="s_i_7")], na.rm = TRUE)
+ub_mean = rowMeans(data_full_BA[,which(colnames(data_full_BA)=="ub_em_1"):which(colnames(data_full_BA)=="ub_soc_4")], na.rm = TRUE)
+ub_em_mean = rowMeans(data_full_BA[,which(colnames(data_full_BA)=="ub_em_1"):which(colnames(data_full_BA)=="ub_em_5")], na.rm = TRUE)
+ub_fin_mean = rowMeans(data_full_BA[,which(colnames(data_full_BA)=="ub_fin_1"):which(colnames(data_full_BA)=="ub_fin_5")], na.rm = TRUE)
+ub_soc_mean = rowMeans(data_full_BA[,which(colnames(data_full_BA)=="ub_soc_1"):which(colnames(data_full_BA)=="ub_soc_4")], na.rm = TRUE)
+eb_mean = rowMeans(data_full_BA[,which(colnames(data_full_BA)=="eb_ind_1"):which(colnames(data_full_BA)=="eb_org_6")], na.rm = TRUE)
+eb_ind_mean = rowMeans(data_full_BA[,which(colnames(data_full_BA)=="eb_ind_1"):which(colnames(data_full_BA)=="eb_ind_8")], na.rm = TRUE)
+eb_org_mean = rowMeans(data_full_BA[,which(colnames(data_full_BA)=="eb_org_1"):which(colnames(data_full_BA)=="eb_org_6")], na.rm = TRUE)
+oj_dim_mean = rowMeans(data_full_BA[,which(colnames(data_full_BA)=="oj_p_1"):which(colnames(data_full_BA)=="oj_if_5")], na.rm = TRUE)
+oj_p_mean = rowMeans(data_full_BA[,which(colnames(data_full_BA)=="oj_p_1"):which(colnames(data_full_BA)=="oj_p_7")], na.rm = TRUE)
+oj_d_mean = rowMeans(data_full_BA[,which(colnames(data_full_BA)=="oj_d_1"):which(colnames(data_full_BA)=="oj_d_4")], na.rm = TRUE)
+oj_ip_mean = rowMeans(data_full_BA[,which(colnames(data_full_BA)=="oj_ip_1"):which(colnames(data_full_BA)=="oj_ip_4")], na.rm = TRUE)
+oj_if_mean = rowMeans(data_full_BA[,which(colnames(data_full_BA)=="oj_if_1"):which(colnames(data_full_BA)=="oj_if_5")], na.rm = TRUE)
+voice_mean = rowMeans(data_full_BA[,which(colnames(data_full_BA)=="voice_1"):which(colnames(data_full_BA)=="voice_6")], na.rm = TRUE)
+turnover_mean = rowMeans(data_full_BA[,which(colnames(data_full_BA)=="turnover_1"):which(colnames(data_full_BA)=="turnover_3")], na.rm = TRUE)
+
+#TEST
+s_c_mean_TEST = rowMeans(data_full_BA[,2:7], na.rm = TRUE)
+all.equal(s_c_mean, s_c_mean_TEST)
+s_i_mean_TEST = rowMeans(data_full_BA[, 8:14], na.rm = TRUE)
+all.equal(s_i_mean, s_i_mean_TEST)
+ub_mean_TEST = rowMeans(data_full_BA[, 35:48], na.rm = TRUE)
+all.equal(ub_mean, ub_mean_TEST)
+eb_mean_TEST = rowMeans(data_full_BA[,49:62], na.rm = TRUE)
+all.equal(eb_mean, eb_mean_TEST)
+
+data_full_BA_mean <- data.frame(p_0002 = data_full_BA$p_0002, s_c_mean, s_i_mean, oj_dim_mean, oj_p_mean, oj_d_mean, oj_ip_mean, oj_if_mean, voice_mean, turnover_mean, ub_mean, eb_mean, ub_em_mean, ub_fin_mean, ub_soc_mean, eb_ind_mean, eb_org_mean, D_ges = data_full_BA$D_ges, D_alt_T1 = data_full_BA$D_alt_num, D_alt_T2 = data_full_BA$d_alt, D_ausb = data_full_BA$D_ausb, D_arb = data_full_BA$D_arb, D_arb_e = data_full_BA$D_arb_e, D_bran = data_full_BA$D_bran, D_mit = data_full_BA$D_mit, D_zeit = data_full_BA$D_zeit, D_pos = data_full_BA$D_pos, D_mit_num = data_full_BA$D_mit_num, D_zeit_num = data_full_BA$D_zeit_num, D_pos_num = data_full_BA$D_pos_num)
+colnames(data_full_BA_mean)
+
+# Nummerisch machen
+data_full_BA_mean[,c(which(colnames(data_full_BA_mean)=="s_c_mean"):which(colnames(data_full_BA_mean)=="eb_org_mean"))]<- sapply(data_full_BA_mean[,c(which(colnames(data_full_BA_mean)=="s_c_mean"):which(colnames(data_full_BA_mean)=="eb_org_mean"))], as.numeric)
+data_full_BA_mean[,c(which(colnames(data_full_BA_mean)=="D_alt_T1"):which(colnames(data_full_BA_mean)=="D_alt_T2"))]<- sapply(data_full_BA_mean[,c(which(colnames(data_full_BA_mean)=="D_alt_T1"):which(colnames(data_full_BA_mean)=="D_alt_T2"))], as.numeric)
+data_full_BA_mean[,c(which(colnames(data_full_BA_mean)=="D_mit_num"):which(colnames(data_full_BA_mean)=="D_pos_num"))]<- sapply(data_full_BA_mean[,c(which(colnames(data_full_BA_mean)=="D_mit_num"):which(colnames(data_full_BA_mean)=="D_pos_num"))], as.numeric)
+```
+
+
+BA Daten Organisieren Behavior Bivariat
+=======================================
+
+```{r}
+# Bivariate Werte berechnen
+data_full_BA_biv_1 <- data_full_BA %>% mutate(ub_em_1_biv = ifelse(ub_em_1 == 1, 0, 1),
+                                            ub_em_2_biv = ifelse(ub_em_2 == 1, 0, 1),
+                                            ub_em_3_biv = ifelse(ub_em_3 == 1, 0, 1),
+                                            ub_em_4_biv = ifelse(ub_em_4 == 1, 0, 1),
+                                            ub_em_5_biv = ifelse(ub_em_5 == 1, 0, 1),
+                                            ub_fin_1_biv = ifelse(ub_fin_1 == 1, 0, 1),
+                                            ub_fin_2_biv = ifelse(ub_fin_2 == 1, 0, 1),
+                                            ub_fin_3_biv = ifelse(ub_fin_3 == 1, 0, 1),
+                                            ub_fin_4_biv = ifelse(ub_fin_4 == 1, 0, 1),
+                                            ub_fin_5_biv = ifelse(ub_fin_5 == 1, 0, 1),
+                                            ub_soc_1_biv = ifelse(ub_soc_1 == 1, 0, 1),
+                                            ub_soc_2_biv = ifelse(ub_soc_2 == 1, 0, 1),
+                                            ub_soc_3_biv = ifelse(ub_soc_3 == 1, 0, 1),
+                                            ub_soc_4_biv = ifelse(ub_soc_4 == 1, 0, 1),
+                                            eb_ind_1_biv = ifelse(eb_ind_1 == 1, 0, 1),
+                                            eb_ind_2_biv = ifelse(eb_ind_2 == 1, 0, 1),
+                                            eb_ind_3_biv = ifelse(eb_ind_3 == 1, 0, 1),
+                                            eb_ind_4_biv = ifelse(eb_ind_4 == 1, 0, 1),
+                                            eb_ind_5_biv = ifelse(eb_ind_5 == 1, 0, 1),
+                                            eb_ind_6_biv = ifelse(eb_ind_6 == 1, 0, 1),
+                                            eb_ind_7_biv = ifelse(eb_ind_7 == 1, 0, 1),
+                                            eb_ind_8_biv = ifelse(eb_ind_8 == 1, 0, 1),
+                                            eb_org_1_biv = ifelse(eb_org_1 == 1, 0, 1),
+                                            eb_org_2_biv = ifelse(eb_org_2 == 1, 0, 1),
+                                            eb_org_3_biv = ifelse(eb_org_3 == 1, 0, 1),
+                                            eb_org_4_biv = ifelse(eb_org_4 == 1, 0, 1),
+                                            eb_org_5_biv = ifelse(eb_org_5 == 1, 0, 1),
+                                            eb_org_6_biv = ifelse(eb_org_6 == 1, 0, 1))
+
+data_full_BA_biv <- data_full_BA_biv_1 %>% mutate(ub_em_biv = (ub_em_1_biv + ub_em_2_biv + ub_em_3_biv + ub_em_4_biv +
+                                                               ub_em_5_biv),
+                                                ub_fin_biv = (ub_fin_1_biv + ub_fin_2_biv + ub_fin_3_biv +
+                                                                ub_fin_4_biv + ub_fin_5_biv),
+                                                ub_soc_biv = (ub_soc_1_biv + ub_soc_2_biv + ub_soc_3_biv +
+                                                                ub_soc_4_biv),
+                                                ub_biv = (ub_em_biv + ub_fin_biv + ub_soc_biv),
+                                                eb_ind_biv = (eb_ind_1_biv + eb_ind_2_biv + eb_ind_3_biv +
+                                                                eb_ind_4_biv + eb_ind_5_biv + eb_ind_6_biv +
+                                                                eb_ind_7_biv + eb_ind_8_biv),
+                                                eb_org_biv = (eb_org_1_biv + eb_org_2_biv + eb_org_3_biv +
+                                                                eb_org_4_biv + eb_org_5_biv + eb_org_6_biv),
+                                                eb_biv = (eb_ind_biv + eb_org_biv))
+
+data_full_BA_biv <- data.frame(p_0002 = data_full_BA$p_0002, s_c_mean, s_i_mean, oj_dim_mean, oj_p_mean, oj_d_mean, oj_ip_mean, oj_if_mean, voice_mean, turnover_mean, ub_biv = data_full_BA_biv$ub_biv, eb_biv = data_full_BA_biv$eb_biv, ub_em_biv = data_full_BA_biv$ub_em_biv, ub_fin_biv = data_full_BA_biv$ub_fin_biv, ub_soc_biv = data_full_BA_biv$ub_soc_biv, eb_ind_biv = data_full_BA_biv$eb_ind_biv, eb_org_biv = data_full_BA_biv$eb_org_biv, D_ges = data_full_BA$D_ges, D_alt_T1 = data_full_BA$D_alt_num, D_alt_T2 = data_full_BA$d_alt, D_ausb = data_full_BA$D_ausb, D_arb = data_full_BA$D_arb, D_arb_e = data_full_BA$D_arb_e, D_bran = data_full_BA$D_bran, D_mit = data_full_BA$D_mit, D_zeit = data_full_BA$D_zeit, D_pos = data_full_BA$D_pos, D_mit_num = data_full_BA$D_mit_num, D_zeit_num = data_full_BA$D_zeit_num, D_pos_num = data_full_BA$D_pos_num)
+colnames(data_full_BA_biv)
+
+# Nummerisch machen
+data_full_BA_biv[,c(which(colnames(data_full_BA_biv)=="s_c_mean"):which(colnames(data_full_BA_biv)=="eb_org_biv"))]<- sapply(data_full_BA_biv[,c(which(colnames(data_full_BA_biv)=="s_c_mean"):which(colnames(data_full_BA_biv)=="eb_org_biv"))], as.numeric)
+data_full_BA_biv[,c(which(colnames(data_full_BA_biv)=="D_alt_T1"):which(colnames(data_full_BA_biv)=="D_alt_T2"))]<- sapply(data_full_BA_biv[,c(which(colnames(data_full_BA_biv)=="D_alt_T1"):which(colnames(data_full_BA_biv)=="D_alt_T2"))], as.numeric)
+data_full_BA_biv[,c(which(colnames(data_full_BA_biv)=="D_mit_num"):which(colnames(data_full_BA_biv)=="D_pos_num"))]<- sapply(data_full_BA_biv[,c(which(colnames(data_full_BA_biv)=="D_mit_num"):which(colnames(data_full_BA_biv)=="D_pos_num"))], as.numeric)
+```
+
+Deskreptive Statistik BA
+=========================
+
+```{r}
+# Anzahl insgesamt
+nrow(data_full_BA_biv)
+```
+```{r}
+# Summary Age
+summary(data_full_BA_biv$D_alt_T1, na.rm = TRUE)
+```
+
+```{r}
+# Summary Age
+summary(data_full_BA_biv$D_alt_T2, na.rm = TRUE)
+```
+
+```{r}
+# Quantiles Age
+quantile(data_full_BA_biv$D_alt_T2, na.rm = TRUE)
+```
+```{r}
+# SD Age
+sd(data_full_BA_biv$D_alt_T2, na.rm = TRUE)
+```
+```{r}
+# Absolute Zahl Männer
+d_gender_male_count = length(which(data_full_BA_biv$D_ges =="Männlich"))
+d_gender_male_count
+```
+
+```{r}
+# Absoluter Anteil Frauen
+d_gender_female_count = length(which(data_full_BA_biv$D_ges =="Weiblich"))
+d_gender_female_count
+```
+```{r}
+#Anteil Frauen
+d_gender_female_perc = (d_gender_female_count)/(d_gender_female_count + d_gender_male_count)
+d_gender_female_perc
+```
+```{r}
+#Anteil Männer
+d_gender_male_perc = (d_gender_male_count)/(d_gender_male_count + d_gender_female_count)
+d_gender_male_perc
+```
+
+```{r}
+# Table: Employment Part- & Fulltime, Job Position, Tenure (in current organization), Company Size, Economic Sector
+outputter <-  function(x){
+  d_rownames <- names(table(x))
+  d_entries <- table(x) %>% as.numeric()
+  d_perc_entries <- table(x) %>% prop.table() %>% as.numeric()
+  return(data.frame("names" = d_rownames,"n" = d_entries,"perc" = d_perc_entries))
+}
+
+tablemaker <- function(listofvars, xtype = "html"){
+  td <- NULL
+  td <- data.frame("names" = NA,"n" = NA, "perc" = NA)
+  
+  for(i in 1:length(listofvars)){
+    td <- rbind(td,outputter(listofvars[[i]]))
+  }
+    stargazer(td[-1,], summary = F, type = xtype, out = "Demograph_BA_v0.20.html")
+    return(td[-1,])
+}
+data_full_HP_soz <- tablemaker(list(data_full_BA$D_arb, data_full_BA$D_pos, data_full_BA$D_zeit, data_full_BA$D_mit,data_full_BA$D_bran))
+```
+
+Korrelation, Mean, SD, Cronbach's Alpha
+========================================
+
+```{r}
+#Korrelation biv. UB & EB
+colnames(data_full_BA_biv)
+data_full_BA_biv <- subset(data_full_BA_biv, select= -c(voice_mean:turnover_mean))
+data_full_BA_biv_corr1 <- subset(data_full_BA_biv, select= c(s_c_mean:eb_biv))
+apa.cor.table(data_full_BA_biv_corr1, filename = "Table_biv_Corr1.doc", table.number = 1)
+```
+
+```{r}
+# Cronbach's Alpha: Compliance
+alpha(subset(data_full_BA, select = c("s_c_1", "s_c_2","s_c_4", "s_c_5","s_c_6", "s_c_8")), check.keys = TRUE)
+```
+```{r}
+# Cronbach's Alpha:Integrity
+alpha(subset(data_full_BA, select = c("s_i_1", "s_i_2","s_i_3", "s_i_4","s_i_5", "s_i_6", "s_i_7")), check.keys = TRUE)
+```
+```{r}
+# Cronbach's Alpha: Overall Fairness
+alpha(subset(data_full_BA, select = c("oj_p_1", "oj_p_2","oj_p_3", "oj_p_4","oj_p_5", "oj_p_6", "oj_p_7", "oj_d_1", "oj_d_2","oj_d_3", "oj_d_4", "oj_ip_1", "oj_ip_2","oj_ip_3", "oj_ip_4", "oj_if_1", "oj_if_2","oj_if_3", "oj_if_4", "oj_if_5")), check.keys = TRUE)
+```
+
+
+```{r}
+# Cronbach's Alpha: Justice Procedural
+alpha(subset(data_full_BA, select = c("oj_p_1", "oj_p_2","oj_p_3", "oj_p_4","oj_p_5", "oj_p_6", "oj_p_7")), check.keys = TRUE)
+```
+
+```{r}
+# Cronbach's Alpha: Justice Distributive
+alpha(subset(data_full_BA, select = c("oj_d_1", "oj_d_2","oj_d_3", "oj_d_4")), check.keys = TRUE)
+```
+
+```{r}
+# Cronbach's Alpha: Justice IP
+alpha(subset(data_full_BA, select = c("oj_ip_1", "oj_ip_2","oj_ip_3", "oj_ip_4")), check.keys = TRUE)
+```
+
+```{r}
+# Cronbach's Alpha: Justice IF
+alpha(subset(data_full_BA, select = c("oj_if_1", "oj_if_2","oj_if_3", "oj_if_4", "oj_if_5")), check.keys = TRUE)
+```
+
+```{r}
+# Cronbach's Alpha: DWB
+data_full_BA_biv_1
+alpha(subset(data_full_BA_biv_1, select = c("ub_em_1_biv", "ub_em_2_biv", "ub_em_3_biv", "ub_em_4_biv","ub_em_5_biv","ub_fin_1_biv", "ub_fin_2_biv", "ub_fin_3_biv", "ub_fin_4_biv", "ub_fin_5_biv","ub_soc_1_biv","ub_soc_2_biv", "ub_soc_3_biv","ub_soc_4_biv")), check.keys = TRUE)
+```
+
+```{r}
+# Cronbach's Alpha: OCB
+alpha(subset(data_full_BA_biv_1, select = c("eb_ind_1_biv", "eb_ind_2_biv", "eb_ind_3_biv", "eb_ind_4_biv", "eb_ind_5_biv", "eb_ind_6_biv", "eb_ind_7_biv", "eb_ind_8_biv", "eb_org_1_biv", "eb_org_2_biv", "eb_org_3_biv","eb_org_4_biv","eb_org_5_biv","eb_org_6_biv")), check.keys = TRUE)
+```
+
+Mediator Analyses (UB & EB Bivariat)
+=====================================
+
+```{r}
+# Daten ordnen (N = 207)
+colnames(data_full_BA_biv)
+data_full_BA_biv_mediator <- subset(data_full_BA_biv, select = -c(p_0002, ub_em_biv:eb_org_biv,D_zeit_num, D_alt_T1, D_ausb:D_pos))
+data_full_BA_biv_mediator <- na.omit(data_full_BA_biv_mediator)
+colnames(data_full_BA_biv_mediator)
+```
+
+LR: Link 1 (Ethics Porgram -> Behavior)
+=======================================
+```{r}
+# 1. LR Compliance & Integrity
+colnames(data_full_BA_biv_mediator)
+lr_sc_ub <- lm(ub_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_c_mean,
+              data_full_BA_biv_mediator)
+
+lr_si_ub <- lm(ub_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_i_mean,
+              data_full_BA_biv_mediator)
+lr_si_eb <- lm(eb_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_i_mean,
+              data_full_BA_biv_mediator)
+
+stargazer( lr_sc_ub,lr_si_ub, lr_si_eb,
+           type = "text",
+           out = "Link1: Compliance & Integrity - DWB & OCB.html",
+           model.numbers = FALSE,
+           keep.stat = c("adj.rsq", "f"),
+           notes.align = "l",
+           single.row = TRUE,
+           notes.label = "Notes.",
+           notes.append = FALSE,
+           no.space = TRUE,
+           dep.var.caption = "",
+           star.cutoffs = c(.05, .01, .001),
+           title = "Results on regression analyses: Compliance & Integrity Strategy on DWB & OCB",
+           covariate.labels = c("Gender (female)", "Age", "Size of the Company","Job
+          Position", "Compliance Strategy", "Integrity Strategy", "Constant"),
+          dep.var.labels = c("DWB","OCB"))
+```
+
+
+LR: Link 2 (Ethics Porgram -> POJ)
+=======================================
+```{r}
+# 1. LR Compliance
+colnames(data_full_BA_biv_mediator)
+
+lr_sc_ojdim <- lm(oj_dim_mean ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_c_mean,
+              data_full_BA_biv_mediator)
+
+lr_sc_ojp <- lm(oj_p_mean ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_c_mean,
+              data_full_BA_biv_mediator)
+
+lr_sc_ojd <- lm(oj_d_mean ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_c_mean,
+              data_full_BA_biv_mediator)
+
+lr_sc_ojip <- lm(oj_ip_mean ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_c_mean,
+              data_full_BA_biv_mediator)
+
+lr_sc_ojif <- lm(oj_if_mean ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_c_mean,
+              data_full_BA_biv_mediator)
+
+
+stargazer(lr_sc_ojdim, lr_sc_ojp, lr_sc_ojd,lr_sc_ojip,lr_sc_ojif,
+           type = "text",
+           out = "Link2: Compliance - Mediator Variables.html",
+           model.numbers = FALSE,
+           keep.stat = c("adj.rsq", "f"),
+           notes.align = "l",
+           single.row = TRUE,
+           notes.label = "Notes.",
+           notes.append = FALSE,
+           no.space = TRUE,
+           dep.var.caption = "",
+           star.cutoffs = c(.05, .01, .001),
+           title = "Results on regression analyses: Compliance Strategy on Overall Fairness & Justice Dimensions",
+           covariate.labels = c("Gender (female)", "Age", "Size of the Company","Job
+          Position","Compliance Strategy", "Constant"),
+          dep.var.labels = c("Overall", "Procedural","Distributional", "Interpersonal", "Informational"))
+```
+
+```{r}
+# 2. LR Integrity
+lr_si_ojdim <- lm(oj_dim_mean ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_i_mean,
+              data_full_BA_biv_mediator)
+
+lr_si_ojp <- lm(oj_p_mean ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_i_mean,
+              data_full_BA_biv_mediator)
+
+lr_si_ojd <- lm(oj_d_mean ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_i_mean,
+              data_full_BA_biv_mediator)
+
+lr_si_ojip <- lm(oj_ip_mean ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_i_mean,
+              data_full_BA_biv_mediator)
+
+lr_si_ojif <- lm(oj_if_mean ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_i_mean,
+              data_full_BA_biv_mediator)
+
+
+stargazer(lr_si_ojdim, lr_si_ojp, lr_si_ojd,lr_si_ojip,lr_si_ojif,
+           type = "text",
+           out = "Link2: Integrity - Mediator Variables.html",
+           model.numbers = FALSE,
+           keep.stat = c("adj.rsq", "f"),
+           notes.align = "l",
+           single.row = TRUE,
+           notes.label = "Notes.",
+           notes.append = FALSE,
+           no.space = TRUE,
+           dep.var.caption = "",
+           star.cutoffs = c(.05, .01, .001),
+           title = "Results on regression analyses: Integrity Strategy on Overall Fairness & Justice Dimensions",
+           covariate.labels = c("Gender (female)", "Age", "Size of the Company","Job
+          Position","Integrity Strategy", "Constant"),
+          dep.var.labels = c("Overall", "Procedural","Distributional", "Interpersonal", "Informational"))
+```
+
+LR: Link 3 (Ethics Porgram & POJ -> Behavior)
+=============================================
+```{r}
+# 1. LR Compliance & POJ -> DWB
+lr_scojdim_ub <- lm(ub_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_c_mean + oj_dim_mean,
+              data_full_BA_biv_mediator)
+lr_scojd_ub <- lm(ub_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_c_mean + oj_d_mean,
+              data_full_BA_biv_mediator)
+lr_scojip_ub <- lm(ub_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_c_mean + oj_ip_mean,
+              data_full_BA_biv_mediator)
+
+stargazer(lr_scojdim_ub,lr_scojd_ub,lr_scojip_ub,
+           type = "text",
+           out = "Link3: Compliance & POJ - DWB.html",
+           model.numbers = FALSE,
+           keep.stat = c("adj.rsq", "f"),
+           notes.align = "l",
+           single.row = TRUE,
+           notes.label = "Notes.",
+           notes.append = FALSE,
+           no.space = TRUE,
+           dep.var.caption = "",
+           star.cutoffs = c(.05, .01, .001),
+           title = "Results on regression analyses: Compliance Strategy & POJ on DWB",
+           covariate.labels = c("Gender (female)", "Age", "Company Size","Job
+          Position","Compliance Strategy", "Overall Fairness", "Distributive", "Interpersonal", "Constant"),
+          dep.var.labels = c("DWB"))
+```
+
+```{r}
+# 2. LR Integrity & POJ -> DWB
+colnames(data_full_BA_biv_mediator)
+lr_siojdim_ub <- lm(ub_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_i_mean + oj_dim_mean,
+              data_full_BA_biv_mediator)
+lr_siojp_ub <- lm(ub_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_i_mean + oj_p_mean,
+              data_full_BA_biv_mediator)
+lr_siojd_ub <- lm(ub_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_i_mean + oj_d_mean,
+              data_full_BA_biv_mediator)
+lr_siojip_ub <- lm(ub_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_i_mean + oj_ip_mean,
+              data_full_BA_biv_mediator)
+lr_siojif_ub <- lm(ub_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_i_mean + oj_if_mean,
+              data_full_BA_biv_mediator)
+
+
+stargazer(lr_siojdim_ub,lr_siojp_ub, lr_siojd_ub, lr_siojip_ub, lr_siojif_ub,
+           type = "text",
+           out = "Link3: Integrity & POJ - DWB.html",
+           model.numbers = FALSE,
+           keep.stat = c("adj.rsq", "f"),
+           notes.align = "l",
+           single.row = TRUE,
+           notes.label = "Notes.",
+           notes.append = FALSE,
+           no.space = TRUE,
+           dep.var.caption = "",
+           star.cutoffs = c(.05, .01, .001),
+           title = "Results on regression analyses: Integrity Strategy & POJ on DWB",
+           covariate.labels = c("Gender (female)", "Age", "Company Size","Job
+          Position","Compliance Strategy", "Overall Fairness", "Procedural",
+          "Distributive","Interpersonal","Informational", "Constant"),
+          dep.var.labels = c("DWB"))
+```
+
+```{r}
+# 3. LR Integrity & POJ -> OCB
+colnames(data_full_BA_biv_mediator)
+lr_siojdim_eb <- lm(eb_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_i_mean + oj_dim_mean,
+              data_full_BA_biv_mediator)
+lr_siojp_eb <- lm(eb_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_i_mean + oj_p_mean,
+              data_full_BA_biv_mediator)
+lr_siojd_eb <- lm(eb_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_i_mean + oj_d_mean,
+              data_full_BA_biv_mediator)
+lr_siojip_eb <- lm(eb_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_i_mean + oj_ip_mean,
+              data_full_BA_biv_mediator)
+lr_siojif_eb <- lm(eb_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_i_mean + oj_if_mean,
+              data_full_BA_biv_mediator)
+
+
+stargazer(lr_siojdim_eb,lr_siojp_eb, lr_siojd_eb, lr_siojip_eb, lr_siojif_eb,
+           type = "text",
+           out = "Link3: Integrity & POJ - OCB.html",
+           model.numbers = FALSE,
+           keep.stat = c("adj.rsq", "f"),
+           notes.align = "l",
+           single.row = TRUE,
+           notes.label = "Notes.",
+           notes.append = FALSE,
+           no.space = TRUE,
+           dep.var.caption = "",
+           star.cutoffs = c(.05, .01, .001),
+           title = "Results on regression analyses: Integrity Strategy & POJ on OCB",
+           covariate.labels = c("Gender (female)", "Age", "Company Size","Job
+          Position","Integrity Strategy", "Overall Fairness", "Procedural",
+          "Distributive","Interpersonal","Informational", "Constant"),
+          dep.var.labels = c("OCB"))
+```
+
+
+Mediator Compliance
+===================
+
+```{r}
+# 1.Compliance & Overall -> UB -> Partial Mediation
+mediation_scojdim_ub <- mediation::mediate(lr_sc_ojdim, lr_scojdim_ub, treat='s_c_mean', mediator='oj_dim_mean', boot=TRUE, sims=1000)
+summary(mediation_scojdim_ub)
+```
+```{r}
+# 2.Compliance & Procedural -> UB -> kein Mediationseffekt
+lr_scojp_ub <- lm(ub_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_c_mean + oj_p_mean,
+              data_full_BA_biv_mediator)
+mediation_scojp_ub <- mediation::mediate(lr_sc_ojp, lr_scojp_ub, treat='s_c_mean', mediator='oj_p_mean', boot=TRUE, sims=1000)
+summary(mediation_scojp_ub )
+```
+
+
+```{r}
+# 3.Compliance & Distributional -> UB -> Partial Mediation
+mediation_scojd_ub <- mediation::mediate(lr_sc_ojd, lr_scojd_ub, treat='s_c_mean', mediator='oj_d_mean', boot=TRUE, sims=1000)
+summary(mediation_scojd_ub )
+```
+```{r}
+# 4.Compliance & IP -> UB -> Full Mediation
+mediation_scojip_ub <- mediation::mediate(lr_sc_ojip, lr_scojip_ub, treat='s_c_mean', mediator='oj_ip_mean', boot=TRUE, sims=1000)
+summary(mediation_scojip_ub )
+```
+```{r}
+# 5.Compliance & IF -> UB -> kein Mediationseffekt
+lr_scojif_ub <- lm(ub_biv ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_c_mean + oj_if_mean,
+              data_full_BA_biv_mediator)
+
+lr_sc_ojif <- lm(oj_if_mean ~ D_ges + D_alt_T2 + D_mit_num + D_pos_num + s_c_mean,
+              data_full_BA_biv_mediator)
+
+mediation_scojif_ub <- mediation::mediate(lr_sc_ojif, lr_scojif_ub, treat='s_c_mean', mediator='oj_if_mean', boot=TRUE, sims=1000)
+summary(mediation_scojif_ub )
+```
+
+Mediator Integrity
+===================
+
+```{r}
+# 1. Integrity & Overall -> UB -> Full Mediation
+mediation_siojdim_ub <- mediation::mediate(lr_si_ojdim, lr_siojdim_ub, treat='s_i_mean', mediator='oj_dim_mean', boot=TRUE, sims=1000)
+summary(mediation_siojdim_ub)
+```
+
+```{r}
+# 2. Integrity & Procedural -> UB -> Full Mediation
+mediation_siojp_ub <- mediation::mediate(lr_si_ojp, lr_siojp_ub, treat='s_i_mean', mediator='oj_p_mean', boot=TRUE, sims=1000)
+summary(mediation_siojp_ub )
+```
+
+
+```{r}
+# 3. Integrity & Distributional -> UB -> Full Mediation
+mediation_siojd_ub <- mediation::mediate(lr_si_ojd, lr_siojd_ub, treat='s_i_mean', mediator='oj_d_mean', boot=TRUE, sims=1000)
+summary(mediation_siojd_ub)
+```
+
+```{r}
+# 4. Integrity & IP -> UB -> Full Mediation
+mediation_siojip_ub <- mediation::mediate(lr_si_ojip, lr_siojip_ub, treat='s_i_mean', mediator='oj_ip_mean', boot=TRUE, sims=1000)
+summary(mediation_siojip_ub)
+```
+```{r}
+# 5. Integrity & IF -> UB -> Full Mediation
+mediation_siojif_ub <- mediation::mediate(lr_si_ojif, lr_siojif_ub, treat='s_i_mean', mediator='oj_if_mean', boot=TRUE, sims=1000)
+summary(mediation_siojif_ub)
+```
+```{r}
+# 1. Integrity & Overall -> EB -> Kein Mediationseffekt
+mediation_siojdim_eb <- mediation::mediate(lr_si_ojdim, lr_siojdim_eb, treat='s_i_mean', mediator='oj_dim_mean', boot=TRUE, sims=1000)
+summary(mediation_siojdim_eb)
+```
+
+```{r}
+# 2. Integrity & Procedural -> EB -> Kein Mediationseffekt
+mediation_siojp_eb <- mediation::mediate(lr_si_ojp, lr_siojp_eb, treat='s_i_mean', mediator='oj_p_mean', boot=TRUE, sims=1000)
+summary(mediation_siojp_eb)
+```
+
+```{r}
+# 3. Integrity & Distributional -> EB -> Partial Mediation
+mediation_siojd_eb <- mediation::mediate(lr_si_ojd, lr_siojd_eb, treat='s_i_mean', mediator='oj_d_mean', boot=TRUE, sims=1000)
+summary(mediation_siojd_eb)
+```
+
+```{r}
+# 4. Integrity & IP -> EB -> Partial Mediation
+mediation_siojip_eb <- mediation::mediate(lr_si_ojip, lr_siojip_eb, treat='s_i_mean', mediator='oj_ip_mean', boot=TRUE, sims=1000)
+summary(mediation_siojip_eb)
+```
+```{r}
+# 5. Integrity & IF -> EB -> kein Mediationseffekt
+mediation_siojif_eb <- mediation::mediate(lr_si_ojif, lr_siojif_eb, treat='s_i_mean', mediator='oj_if_mean', boot=TRUE, sims=1000)
+summary(mediation_siojif_eb)
+```
+
+
+
